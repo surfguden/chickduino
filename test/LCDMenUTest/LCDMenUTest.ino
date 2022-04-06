@@ -4,6 +4,7 @@
 // ** Dependencies **
 // include CMBMenu
 #include "CMBMenu.hpp"
+#include "RTClib.h"
 /*
  * mblib - MB library
  * https://github.com/mchlbrnhrd/mbLib
@@ -14,6 +15,8 @@
 #include <Adafruit_RGBLCDShield.h>
 #include <utility/Adafruit_MCP23017.h>
 
+// include the Timer Library code:
+#include <arduino-timer.h>
 
 // ********************************************
 // definitions
@@ -32,27 +35,33 @@
 //Menu 
 // define text to display
 const char g_MenuDoor[] PROGMEM = {"1. Door"};
-const char g_MenuDoorMode[] PROGMEM = {"1.1 Door Mode"};
-const char g_MenuDoorModeSun[] PROGMEM = {"1.1.1 Sunset"};
-const char g_MenuDoorModeTimer[] PROGMEM = {"1.1.2 Timer"};
+const char g_MenuDoorSettings[] PROGMEM = {"1.1 Door Settings"};
+const char g_MenuDoorMode[] PROGMEM = {"1.1.1 Door Mode"};
+const char g_MenuDoorModeSun[] PROGMEM = {"1.1.1.1 Sunset"};
+const char g_MenuDoorModeTimer[] PROGMEM = {"1.1.1.2 Timer"};
+const char g_MenuDoorSetTimer[] PROGMEM = {"1.1.2 Set Timer"};
 const char g_MenuDoorForceOpen[] PROGMEM = {"1.2.1 Open Door"};
 const char g_MenuDoorForceClose[] PROGMEM = {"1.2.2 Close Door"};
 const char g_MenuNest[] PROGMEM = {"2. Nest"};
 const char g_MenuNestForceOpen[] PROGMEM = {"2.1 Open Nest"};
 const char g_MenuNestForceClose[] PROGMEM = {"2.1 Close Nest"};
+const char g_MenuDisplayTime[] PROGMEM = {"3. Display Time"};
 
 // define function IDs
 enum MenuFID {
     MenuDummy,
     MenuDoor,
     MenuDoorMode,
+    MenuDoorSettings,
     MenuDoorModeSun,
     MenuDoorModeTimer,
     MenuDoorForceOpen,
     MenuDoorForceClose,
     MenuNest,
     MenuNestForceOpen,
-    MenuNestForceClose
+    MenuNestForceClose,
+    MenuDisplayTime,
+    MenuDoorSetTimer
 };
 
 // define key types
@@ -66,12 +75,43 @@ enum KeyType {
 };
 
 
+//RTC
+char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+
+// ********************************************
+// Globals
+// ********************************************
+
 // create global LCD instance
 Adafruit_RGBLCDShield lcd = Adafruit_RGBLCDShield();
 
 // create global CMBMenu instance
 // (here for maximum 100 menu entries)
 CMBMenu<100> g_Menu;
+
+//Create RTC Instance
+RTC_PCF8523 rtc;
+
+//Other Sketch globals
+//Door Related
+bool DoorMode = true; //True is Timer, False is Sunset/Sundown 
+int DoorTimerOpenHour = 11;
+int DoorTimerCloseHour = 0;
+int DoorTimerOpenMinute = 52;
+int DoorTimerCloseMinute = 35;
+int DoorRunningTime=10000; //This is the time (ms) it takes for the door to open or close, I.e the timer after the door stopped function is called
+bool DoorRunningOpen=false;
+bool DoorRunningClose=false;
+Timer<1, millis, const char *> DoorHandlerTimer;
+//Nest Related
+int NestTimerOpenHour = 11;
+int NestTimerCloseHour = 0;
+int NestTimerOpenMinute = 52;
+int NestTimerCloseMinute = 35;
+int NestRunningTime=10000; //This is the time (ms) it takes for the door to open or close, I.e the timer after the door stopped function is called
+bool NestRunningOpen=false;
+bool NestRunningClose=false;
+
 
 
 // ********************************************
@@ -84,6 +124,7 @@ void setup()
   // LCD
   lcd.begin(16, 2);
   lcd.print("Hello, eggmakers");
+  lcd.noAutoscroll();
   
   delay(1000);
 
@@ -98,14 +139,17 @@ void setup()
   // ** menu **
   // add nodes to menu (layer, string, function ID)
   g_Menu.addNode(0, g_MenuDoor, MenuDoor);
-  g_Menu.addNode(1, g_MenuDoorMode, MenuDoorMode);
-  g_Menu.addNode(2, g_MenuDoorModeSun, MenuDoorModeSun);
-  g_Menu.addNode(2, g_MenuDoorModeTimer, MenuDoorModeTimer);
+  g_Menu.addNode(1, g_MenuDoorSettings, MenuDoorSettings);
+  g_Menu.addNode(2, g_MenuDoorMode, MenuDoorMode);
+  g_Menu.addNode(3, g_MenuDoorModeSun, MenuDoorModeSun);
+  g_Menu.addNode(3, g_MenuDoorModeTimer, MenuDoorModeTimer);
+  g_Menu.addNode(2, g_MenuDoorSetTimer, MenuDoorSetTimer);
   g_Menu.addNode(1, g_MenuDoorForceOpen, MenuDoorForceOpen);
   g_Menu.addNode(1, g_MenuDoorForceClose, MenuDoorForceClose);
   g_Menu.addNode(0, g_MenuNest, MenuNest);
   g_Menu.addNode(1, g_MenuNestForceOpen, MenuNestForceOpen);
   g_Menu.addNode(1, g_MenuNestForceClose, MenuNestForceClose);
+  g_Menu.addNode(0, g_MenuDisplayTime, MenuDisplayTime);
 
 
   // ** menu **
@@ -118,6 +162,23 @@ void setup()
   // ** menu **
   // print current menu entry
    printMenuEntry(info);
+
+
+   //RTC
+    if (! rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+    Serial.flush();
+    while (1) delay(10);
+  }
+   
+   if (! rtc.initialized() || rtc.lostPower()) {
+    Serial.println("RTC is NOT initialized, let's set the time!");
+    // When time needs to be set on a new device, or after a power loss, the
+    // following line sets the RTC to the date & time this sketch was compiled
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+   }
+   rtc.start();
+
 }
 
 
@@ -127,6 +188,12 @@ void setup()
 
 void loop()
 {
+  //get time
+   DateTime now = rtc.now();
+
+  //Run Door Handler
+  RunDoorHandler(now);
+  
   // function ID
   int fid = 0;
 
@@ -138,6 +205,8 @@ void loop()
 
   // determine pressed key
   KeyType key = getKey();
+
+
 
   // ** menu **
   // call menu methods regarding pressed key
@@ -171,21 +240,31 @@ void loop()
   if ((0 != fid) && (KeyRight == key) && (!layerChanged)) {
     switch (fid) {
       case MenuDoorForceOpen:
-        lcd.clear();
-        lcd.print("opening door");
+        OpenDoor();
         break;
       case MenuDoorForceClose:
-        lcd.clear();
-        lcd.print("closing door");
+        CloseDoor();
         break;
       case MenuDummy:
         Test1();
+        break;
+      case MenuDisplayTime:
+        DisplayTime(now);
+        break;
+      case MenuDoorSetTimer:
+        SetDoorTimer(); //Also set values to eeprom here
         break;
       default:
         break;
     }
   }
 }
+
+
+// ********************************************
+// Functions Used in Sketch Below:
+// ********************************************
+
 
 // ********************************************
 // ** menu **
@@ -202,9 +281,7 @@ void printMenuEntry(const char* f_Info)
   Serial.println(info_s);
   Serial.println("----------------");
   
-
   // print on LCD
-
   lcd.clear();
   lcd.print(info_s);
 
@@ -212,16 +289,15 @@ void printMenuEntry(const char* f_Info)
   // g_Lcd.setCursor(0, 1);
   // g_Lcd.print(info_s);
 }
+
 // ********************************************
 // getKey
 // ********************************************
 KeyType getKey()
 {
   KeyType key = KeyNone;
-
   // here for demonstration: get "pressed" key from terminal
   // replace code when using push buttons
-
  /* 
  while(Serial.available() > 0) {
     String Key_s = Serial.readString();
@@ -243,8 +319,7 @@ KeyType getKey()
       g_Menu.printMenu();
       }
   }
- */ 
-    
+ */    
     uint8_t buttons = lcd.readButtons();
     if (buttons) {
       lcd.clear();
@@ -276,11 +351,75 @@ KeyType getKey()
       key = KeySelect;
     }
   }
-    
-  
-
  return key;
 }
+
+// ********************************************
+// DisplayTime
+// ********************************************
+void DisplayTime(DateTime now)
+{
+  lcd.clear();
+  lcd.print(now.hour());
+}
+
+// ********************************************
+// OpenDoor
+// ********************************************
+void OpenDoor()
+{
+  if(DoorRunningOpen==false){
+    DoorHandlerTimer.cancel();
+    DoorHandlerTimer.in(DoorRunningTime, StopDoor);
+    lcd.clear();
+    lcd.print("Opening Door");
+    DoorRunningOpen=true;
+  }
+}
+
+// ********************************************
+// CloseDoor
+// ********************************************
+void CloseDoor()
+{
+  if(DoorRunningClose==false){
+    DoorHandlerTimer.cancel();
+    DoorHandlerTimer.in(DoorRunningTime, StopDoor);
+    lcd.clear();
+    lcd.print("Closing Door");
+    DoorRunningClose=true;
+  }  
+}
+// ********************************************
+// StopDoor
+// ********************************************
+bool StopDoor()  //This function is only used by the DoorHandlerTimer
+{
+  lcd.clear();
+  lcd.print("Stopping Door");
+  DoorRunningOpen=false;
+  DoorRunningClose=false;
+  delay(1000);
+  return false;
+   
+}
+// ********************************************
+// RunDoorHandler
+// ********************************************
+void RunDoorHandler(DateTime now) //TBD Add which motor here as input argument. First This function checks time. If any conditions are true (on the second) these actions will be executed. Door is automatically stopped after int DoorRunningTime
+{
+  DoorHandlerTimer.tick();
+  if(now.hour()==DoorTimerOpenHour && now.minute()==DoorTimerOpenMinute){    
+    OpenDoor();    
+  }
+  else if(now.hour()==DoorTimerCloseHour && now.hour()==DoorTimerCloseMinute){
+    CloseDoor();
+    }
+}
+
+//int DoorTimerOpenHour = 0;
+//int DoorTimerCloseHour = 0;
+
 
 // ********************************************
 // FooA
@@ -317,6 +456,154 @@ void BarA()
   Serial.println("Function BarA() was called.");
 
 }
+
+
+// ********************************************
+//void SetDoorTimer()
+// ********************************************
+void SetDoorTimer()
+{
+  DoorTimerOpenHour=SetTimerHour(DoorTimerOpenHour, "door open");
+  DoorTimerOpenMinute=SetTimerMinute(DoorTimerOpenMinute, "door open");
+  DoorTimerCloseHour=SetTimerHour(DoorTimerCloseHour, "door close");
+  DoorTimerCloseMinute=SetTimerMinute(DoorTimerCloseMinute, "door close");
+
+  //Write Values To EEprom here
+}
+
+// ********************************************
+// SetTimerHour.  
+// ********************************************
+
+int SetTimerHour(int hour, String mystring)
+{
+  lcd.blink();
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Set" +mystring +" Open Hr");
+  lcd.setCursor(0,1);
+  lcd.print(hour);
+  bool set=true;
+  while(set){
+    uint8_t buttons = lcd.readButtons();
+    if (buttons) {
+      delay(150);
+      if (buttons & BUTTON_UP) {
+        hour=IncreaseHour(hour);
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.print("Set" +mystring +" Hr");
+        lcd.setCursor(0,1);
+        lcd.print(hour);       
+      }
+      if (buttons & BUTTON_DOWN) {
+        hour=DecreaseHour(hour);
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.print("Set" +mystring +"Hr");
+        lcd.setCursor(0,1);
+        lcd.print(hour); 
+      }
+      if (buttons & BUTTON_RIGHT) {
+        lcd.clear();
+        lcd.print("Value Set!");
+        set=false;
+      }
+    }     
+  }
+  lcd.noBlink();
+  return hour;
+}
+
+// ********************************************
+// SetTimerMinute.  
+// ********************************************
+
+int SetTimerMinute(int minute, String mystring)
+{
+  lcd.blink();
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Set" +mystring +" Min");
+  lcd.setCursor(0,1);
+  lcd.print(minute);
+  bool set=true;
+  while(set){
+    uint8_t buttons = lcd.readButtons();
+    if (buttons) {
+      delay(150);
+      if (buttons & BUTTON_UP) {
+        minute=IncreaseMinute(minute);
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.print("Set" +mystring +" Min");
+        lcd.setCursor(0,1);
+        lcd.print(minute);       
+      }
+      if (buttons & BUTTON_DOWN) {
+        minute=DecreaseMinute(minute);
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.print("Set" +mystring +" Min");
+        lcd.setCursor(0,1);
+        lcd.print(minute); 
+      }
+      if (buttons & BUTTON_RIGHT) {
+        lcd.clear();
+        lcd.print("Value Set!");
+        set=false;
+        
+      }
+    }   
+  }
+  lcd.noBlink();
+  return minute;
+}
+// ********************************************
+// IncreaseHour
+// ********************************************
+int IncreaseHour(int hour)
+{
+  hour=hour+1;
+  if(hour>23){
+    hour=23;
+    }
+  return hour;
+  }
+// ********************************************
+// DecreaseHour
+// ********************************************  
+int DecreaseHour(int hour)
+{
+  hour=hour-1;
+  if(hour<0){
+    hour=0;
+    }
+  return hour;
+  }
+// ********************************************
+// IncreaseMinute
+// ********************************************
+int IncreaseMinute(int minute)
+{
+  minute=minute+1;
+  if(minute>59){
+    minute=59;
+    }
+  return minute;
+  }
+// ********************************************
+// DecreaseMinute
+// ********************************************  
+int DecreaseMinute(int minute)
+{
+  minute=minute-1;
+  if(minute<0){
+    minute=0;
+    }
+  return minute;
+  }  
+  
 
 // ========================================================================
 // naming convention
