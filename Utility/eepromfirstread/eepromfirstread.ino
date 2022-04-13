@@ -10,6 +10,8 @@ DateTime TimeDoorOpen;
 DateTime TimeDoorClose;
 DateTime TimeNestOpen;
 DateTime TimeNestClose;
+DateTime TimeLEDOpen;
+DateTime TimeLEDClose;
 TimeSpan SunsetOffset;
 TimeSpan SunRiseOffset;
 bool DoorMode;

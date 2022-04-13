@@ -1,4 +1,4 @@
-//TBD NestHandler, Battery, SunsetSundown, EEPROM, MotorShield
+//TBD  Battery, Calculate Sunset, SunriseSundown Handler, Display when door will open or close, Display Todays Sunset and Sunrise
 
 
 // ** Dependencies **
@@ -7,6 +7,7 @@
 #include "RTClib.h"
 #include <Adafruit_MotorShield.h>
 #include <EEPROM.h>
+#include <Dusk2Dawn.h>
 /*
  * mblib - MB library
  * https://github.com/mchlbrnhrd/mbLib
@@ -37,40 +38,57 @@
 #define VIOLET 0x5
 #define WHITE 0x7
 
+// ********************************************
+// Globals
+// ********************************************
+
 //Menu 
 // define text to display
 const char g_MenuDoor[] PROGMEM = {"1. Door"};
-const char g_MenuDoorSettings[] PROGMEM = {"1.1 Door Settings"};
-const char g_MenuDoorMode[] PROGMEM = {"1.1.1 Door Mode"};
-const char g_MenuDoorModeSun[] PROGMEM = {"1.1.1.1 Sunset"};
-const char g_MenuDoorModeTimer[] PROGMEM = {"1.1.1.2 Timer"};
-const char g_MenuDoorSetTimer[] PROGMEM = {"1.1.2 Set Timer"};
-const char g_MenuDoorForceOpen[] PROGMEM = {"1.2 Open Door"};
-const char g_MenuDoorForceClose[] PROGMEM = {"1.3 Close Door"};
+const char g_MenuDoorSetMode[] PROGMEM = {"1.1 SetDoorMode"};
+const char g_MenuDoorSetTimer[] PROGMEM = {"1.2 SetDoorTimer"};
+const char g_MenuDoorSetOffset[] PROGMEM = {"1.3 SetSunOffset"};
+const char g_MenuDoorForceOpen[] PROGMEM = {"1.4 Open Door"};
+const char g_MenuDoorForceClose[] PROGMEM = {"1.5 Close Door"};
 const char g_MenuNest[] PROGMEM = {"2. Nest"};
-const char g_MenuNestForceOpen[] PROGMEM = {"2.1 Open Nest"};
-const char g_MenuNestForceClose[] PROGMEM = {"2.2 Close Nest"};
-const char g_MenuBattery[] PROGMEM = {"3. Battery"};
-const char g_MenuDisplayTime[] PROGMEM = {"4. Display Time"};
-const char g_MenuInfoScreen[] PROGMEM = {"5. InfoScreen"};
+const char g_MenuNestSetTimer[] PROGMEM = {"2.1 SetNestTimer"};
+const char g_MenuNestForceOpen[] PROGMEM = {"2.2 Open Nest"};
+const char g_MenuNestForceClose[] PROGMEM = {"2.3 Close Nest"};
+const char g_MenuLED[] PROGMEM = {"3. LED"};
+const char g_MenuLEDSetTimer[] PROGMEM = {"3.1 SetLEDTimer"};
+const char g_MenuLEDForceOpen[] PROGMEM = {"3.2 Turn on LED"};
+const char g_MenuLEDForceClose[] PROGMEM = {"3.2 Turn off LED"};
+const char g_MenuBattery[] PROGMEM = {"4. Battery"};
+const char g_MenuTime[] PROGMEM = {"5. Time"};
+const char g_MenuTimeSetDate[] PROGMEM = {"5.1 Set Date"};
+const char g_MenuTimeSetTime[] PROGMEM = {"5.2 Set Time"};
+const char g_MenuTimeSetDayLightSavings[] PROGMEM = {"5.3SetSummerTime"};
+const char g_MenuInfoScreen[] PROGMEM = {"6. InfoScreen"};
 
 
 // define function IDs
 enum MenuFID {
     MenuDummy,
     MenuDoor,
-    MenuDoorMode,
-    MenuDoorSettings,
-    MenuDoorModeSun,
-    MenuDoorModeTimer,
+    MenuDoorSetMode,
+    MenuDoorSetTimer,
+    MenuDoorSetOffset,
     MenuDoorForceOpen,
     MenuDoorForceClose,
     MenuNest,
+    MenuNestSetTimer,
     MenuNestForceOpen,
     MenuNestForceClose,
-    MenuDisplayTime,
-    MenuDoorSetTimer,
-    MenuBattery
+    MenuLED,
+    MenuLEDSetTimer,
+    MenuLEDForceOpen,
+    MenuLEDForceClose,
+    MenuBattery,
+    MenuTime,
+    MenuTimeSetDate,
+    MenuTimeSetTime,
+    MenuTimeSetDayLightSavings,
+    MenuInfoScreen
 };
 
 // define key types
@@ -86,10 +104,6 @@ enum KeyType {
 
 //RTC
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-
-// ********************************************
-// Globals
-// ********************************************
 
 // create global LCD instance
 Adafruit_RGBLCDShield lcd = Adafruit_RGBLCDShield();
@@ -110,7 +124,10 @@ Adafruit_MotorShield AFMS = Adafruit_MotorShield();
 Adafruit_DCMotor *DoorMotor = AFMS.getMotor(1);
 Adafruit_DCMotor *NestMotorLeft = AFMS.getMotor(2);
 Adafruit_DCMotor *NestMotorRight = AFMS.getMotor(3);
+Adafruit_DCMotor *LEDMotor = AFMS.getMotor(4);
 
+//Time Related
+bool DayLightSavings = true; //True is "summer time", F is WinterTime. 
 
 //Other Sketch globals
 //Door Related
@@ -120,25 +137,30 @@ DateTime TimeDoorClose (2000, 1, 1, 20, 0, 0);
 DateTime Sunrise (2000, 1, 1, 8, 0, 0);
 DateTime Sunset (2000, 1, 1, 8, 0, 0);
 TimeSpan SunsetOffset;
-TimeSpan SunRiseOffset;
-int DoorRunningTime=10000; //This is the time (ms) it takes for the door to open or close, I.e the timer after the door stopped function is called
-bool DoorRunningOpen=false;
-bool DoorRunningClose=false;
+TimeSpan SunriseOffset;
+int DoorRunningTime=60000; //This is the time (ms) it takes for the door to open or close, I.e the timer after the door stopped function is called
+bool DoorRunningOpen=false; // Could be declared as static
+bool DoorRunningClose=false; // Could be declared as static
 Timer<1, millis, const char *> DoorHandlerTimer;
-
 
 //Nest Related
 DateTime TimeNestOpen (2000, 1, 1, 8, 0, 0);
 DateTime TimeNestClose (2000, 1, 1, 20, 0, 0);
-int NestRunningTime=10000; //This is the time (ms) it takes for the door to open or close, I.e the timer after the door stopped function is called
+int NestRunningTime=60000; //This is the time (ms) it takes for the nest to open or close, I.e the timer after the door stopped function is called
 bool NestRunningOpen=false; // Could be declared as static
 bool NestRunningClose=false; // Could be declared as static
 Timer<1, millis, const char *> NestHandlerTimer;
 
+//LED Related
+DateTime TimeLEDOpen (2000, 1, 1, 8, 0, 0);;
+DateTime TimeLEDClose  (2000, 1, 1, 20, 0, 0);
+bool LEDRunningOpen=false; // Could be declared as static
+bool LEDRunningClose=false; // Could be declared as static
+
 //Idle Timer
 elapsedMillis IdleTimeElapsed;
 elapsedMillis IdleScrollTimeElapsed;
-#define IDLEWAITTIME 6000 // milliseconds
+#define IDLEWAITTIME 10000 // milliseconds
 
 //Eeprom
 struct EEpromValues{
@@ -146,12 +168,20 @@ DateTime TimeDoorOpen;
 DateTime TimeDoorClose;
 DateTime TimeNestOpen;
 DateTime TimeNestClose;
+DateTime TimeLEDOpen;
+DateTime TimeLEDClose;
 TimeSpan SunsetOffset;
-TimeSpan SunRiseOffset;
+TimeSpan SunriseOffset;
 bool DoorMode;
 int DoorRunningTime;
 int NestRunningTime;
+bool DayLightSavings;
 };
+
+
+//Dusk2Dawn
+Dusk2Dawn City(56.0505, 12.69401, 1);   // Available methods are sunrise() and sunset(). Arguments are year, month,day, and if Daylight Saving Time is in effect.
+DateTime Midnight (2000, 1, 1, 0, 0, 0);
 
 
 // ********************************************
@@ -179,18 +209,25 @@ void setup()
   // ** menu **
   // add nodes to menu (layer, string, function ID)
   g_Menu.addNode(0, g_MenuDoor, MenuDoor);
-  g_Menu.addNode(1, g_MenuDoorSettings, MenuDoorSettings);
-  g_Menu.addNode(2, g_MenuDoorMode, MenuDoorMode);
-  g_Menu.addNode(3, g_MenuDoorModeSun, MenuDoorModeSun);
-  g_Menu.addNode(3, g_MenuDoorModeTimer, MenuDoorModeTimer);
-  g_Menu.addNode(2, g_MenuDoorSetTimer, MenuDoorSetTimer);
+  g_Menu.addNode(1, g_MenuDoorSetMode, MenuDoorSetMode);
+  g_Menu.addNode(1, g_MenuDoorSetTimer, MenuDoorSetTimer);
+  g_Menu.addNode(1, g_MenuDoorSetOffset, MenuDoorSetOffset);
   g_Menu.addNode(1, g_MenuDoorForceOpen, MenuDoorForceOpen);
   g_Menu.addNode(1, g_MenuDoorForceClose, MenuDoorForceClose);
   g_Menu.addNode(0, g_MenuNest, MenuNest);
+  g_Menu.addNode(1, g_MenuNestSetTimer, MenuNestSetTimer);
   g_Menu.addNode(1, g_MenuNestForceOpen, MenuNestForceOpen);
   g_Menu.addNode(1, g_MenuNestForceClose, MenuNestForceClose);
+  g_Menu.addNode(0, g_MenuLED, MenuLED);
+  g_Menu.addNode(1, g_MenuLEDSetTimer, MenuLEDSetTimer);
+  g_Menu.addNode(1, g_MenuLEDForceOpen, MenuLEDForceOpen);
+  g_Menu.addNode(1, g_MenuLEDForceClose, MenuLEDForceClose);
   g_Menu.addNode(0, g_MenuBattery, MenuBattery);
-  g_Menu.addNode(0, g_MenuDisplayTime, MenuDisplayTime);
+  g_Menu.addNode(0, g_MenuTime, MenuTime);
+  g_Menu.addNode(1, g_MenuTimeSetDate, MenuTimeSetDate);
+  g_Menu.addNode(1, g_MenuTimeSetTime, MenuTimeSetTime);
+  g_Menu.addNode(1, g_MenuTimeSetDayLightSavings, MenuTimeSetDayLightSavings);  
+  g_Menu.addNode(0, g_MenuInfoScreen, MenuInfoScreen);
 
 
   // ** menu **
@@ -211,7 +248,7 @@ void setup()
     while (1) delay(10);
   }
    if (! rtc.initialized() || rtc.lostPower()) {
-    Serial.println("RTC is NOT initialized, let's set the time!");
+    Serial.println(F("RTC is NOT initialized, let's set the time!"));
     // When time needs to be set on a new device, or after a power loss, the
     // following line sets the RTC to the date & time this sketch was compiled
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
@@ -244,19 +281,25 @@ void loop()
 {
   //get time
    DateTime now = rtc.now();
-
+  //Adjust For Daylight Savings. No need to adjust RTC
+  now= now+TimeSpan (0,DayLightSavings,0,0);
+  // Run SunriseCalculator After DaylightSavings Compensation!
+  SunriseCalculator(now);
   //Run Door Handler
   RunDoorHandler(now);
+  //Run Nest Handler
+  RunNestHandler(now);
+    //Run LED Handler
+  RunLEDHandler(now);
+
+
   
   // function ID
   int fid = 0;
-
   // info text from menu
   const char* info;
-
   // go to deeper or upper layer?
   bool layerChanged=false;
-
   // determine pressed key by polling buttons
   KeyType key = getKey();
   // Check and Run idle task if no key is pressed
@@ -288,32 +331,53 @@ void loop()
     fid = g_Menu.getInfo(info);
     printMenuEntry(info);
   }
-
   // ** menu **
   // do action regarding function ID "fid"
   if ((0 != fid) && (KeyRight == key) && (!layerChanged)) {
     switch (fid) {
+      case MenuDoorSetMode:
+        SetDoorMode();
+        break;
+      case MenuDoorSetTimer:
+        SetDoorTimer(); 
+        break;
+      case MenuDoorSetOffset:
+        SetSunriseSunsetOffset(); 
+        break;
       case MenuDoorForceOpen:
         OpenDoor();
         break;
       case MenuDoorForceClose:
         CloseDoor();
-        break;
-      case MenuDummy:
-        Test1();
-        break;
-      case MenuDisplayTime:
-        DisplayDateTime(now);
-        break;
-      case MenuDoorSetTimer:
-        SetDoorTimer(); //Also set values to eeprom here
-        break;
+        break; 
+      case MenuNestSetTimer:
+        SetNestTimer(); 
+        break;  
       case MenuNestForceOpen:
         OpenNest();
         break;
       case MenuNestForceClose:
         CloseNest();
         break;
+      case MenuLEDSetTimer:
+        SetLEDTimer(); 
+        break;
+      case MenuLEDForceOpen:
+        OpenLED(); 
+        break;
+      case MenuLEDForceClose:
+        CloseLED(); 
+        break;
+      case MenuTimeSetDate:
+        SetCurrentDate(now);
+        break;
+      case MenuTimeSetDayLightSavings:
+        SetDayLightSavings(); 
+        break;
+      case MenuInfoScreen:
+        DisplayInfo(now); 
+        break;
+
       default:
         break;
     }
@@ -474,22 +538,71 @@ bool StopNest()  //This function is only used by the DoorHandlerTimer
   NestMotorLeft->run(RELEASE);
   NestMotorRight->run(RELEASE);
   return false;
-   
 }
+
+// ********************************************
+// OpenLED  (The same as turn on LED)
+// ********************************************
+void OpenLED()
+{
+  if(LEDRunningOpen==false){
+    lcd.clear();
+    lcd.print(F("Turning On LED"));
+    LEDRunningOpen=true;
+    LEDMotor->setSpeed(255);
+    LEDMotor->run(FORWARD);
+    LEDRunningClose=false; //This can be Improved
+  }
+}
+
+// ********************************************
+// CloseLED
+// ********************************************
+void CloseLED()
+{
+  if(LEDRunningClose==false){
+    lcd.clear();
+    lcd.print(F("Turning off LED"));
+    LEDRunningClose=true;
+    LEDMotor->run(RELEASE);
+    LEDRunningOpen=true; //This can be Improved
+  }  
+}
+
+// ********************************************
+// SunRiseCalculator
+// ********************************************
+void SunriseCalculator(DateTime now){
+    int SunriseMinutes = City.sunrise(now.year(), now.month(), now.day(), DayLightSavings);  //Returns Sunrise as minutes since midnight
+    int SunsetMinutes = City.sunset(now.year(), now.month(), now.day(), DayLightSavings);  //Returns Sunrise as minutes since midnight
+    Sunrise= Midnight +TimeSpan (0,SunriseMinutes/60,SunriseMinutes%60, 0) ;
+    Sunset= Midnight +TimeSpan (0,SunsetMinutes/60,SunsetMinutes%60, 0);
+}
+
+
 // ********************************************
 // RunDoorHandler
 // ********************************************
 void RunDoorHandler(DateTime now) // This function checks time. If any conditions are true (on the Second) these actions will be executed. Door is automatically stopped after int DoorRunningTime
 {
   DoorHandlerTimer.tick();
-  if(now.hour()==TimeDoorOpen.hour() && now.minute()==TimeDoorOpen.minute() &&now.second()==0){    
-    OpenDoor();    
-  }
-  else if(now.hour()==TimeDoorClose.hour() && now.minute()==TimeDoorClose.minute() && now.second()==0){
-    CloseDoor();
+  if(DoorMode){ //Timer Mode
+    if(now.hour()==TimeDoorOpen.hour() && now.minute()==TimeDoorOpen.minute() &&now.second()==0){    
+      OpenDoor();    
     }
+    else if(now.hour()==TimeDoorClose.hour() && now.minute()==TimeDoorClose.minute() && now.second()==0){
+      CloseDoor();
+    }
+  }
+  if (!DoorMode){ //SunsetMode
+    
+  }
 }
 
+
+
+//DateTime Sunrise (2000, 1, 1, 0, 0, 0);
+//DateTime Sunset (2000, 1, 1, 0, 0, 0);
 // ********************************************
 // RunNestHandler
 // ********************************************
@@ -504,41 +617,45 @@ void RunNestHandler(DateTime now) //This function checks time. If any conditions
     }
 }
 
-
-
 // ********************************************
-// FooA
+// RunLEDHandler
 // ********************************************
-void FooA()
+void RunLEDHandler(DateTime now) //This function checks time. If any conditions are true (on the Second) these actions will be executed. 
 {
-  Serial.println("Function FooA() was called.");
-
+  if(now.hour()==TimeLEDOpen.hour() && now.minute()==TimeLEDOpen.minute() &&now.second()==0){    
+    OpenLED();    
+  }
+  else if(now.hour()==TimeLEDClose.hour() && now.minute()==TimeLEDClose.minute() && now.second()==0){
+    CloseLED();
+    }
 }
 
 // ********************************************
-// Test1
+//void SetLEDTimer()
 // ********************************************
-void Test1()
+void SetLEDTimer()
 {
-  Serial.println("Function Test1() was called.");
-
+  lcd.setBacklight(RED);
+  TimeLEDOpen=SetTimerHour(TimeLEDOpen, "LED ON");
+  TimeLEDOpen=SetTimerMinute(TimeLEDOpen, "LED ON");
+  TimeLEDClose=SetTimerHour(TimeLEDClose,"LED OFF");
+  TimeLEDClose=SetTimerMinute(TimeLEDClose, "LED OFF");
+  WriteToEeprom();
+  lcd.setBacklight(TEAL);
 }
 
 // ********************************************
-// Test2
+//void SetNestTimer()
 // ********************************************
-void Test2()
+void SetNestTimer()
 {
-  Serial.println("Function Test2() was called.");
-
-}
-
-// ********************************************
-// BarA
-// ********************************************
-void BarA()
-{
-  Serial.println("Function BarA() was called.");
+  lcd.setBacklight(RED);
+  TimeNestOpen=SetTimerHour(TimeNestOpen, "nest open");
+  TimeNestOpen=SetTimerMinute(TimeNestOpen, "nest open");
+  TimeNestClose=SetTimerHour(TimeNestClose,"nest close");
+  TimeNestClose=SetTimerMinute(TimeNestClose, "nest close");
+  WriteToEeprom();
+  lcd.setBacklight(TEAL);
 }
 
 // ********************************************
@@ -556,9 +673,289 @@ void SetDoorTimer()
 }
 
 // ********************************************
+//void SetCurrentDate() Implement a RTC adjust here
+// ********************************************
+void SetCurrentDate(DateTime now)
+{
+  lcd.setBacklight(RED);
+  SetTimerYear(now, "current");
+  SetTimerMonth(now, "current");
+  SetTimerDay(now,"current");
+  lcd.setBacklight(TEAL);
+}
+
+// ********************************************
+//void SetDoorMode()
+// ********************************************
+void SetDoorMode()
+{
+  lcd.setBacklight(RED);
+  lcd.blink();
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print(F("Set Door MODE"));
+  lcd.setCursor(0,1);
+  if (DoorMode){
+    lcd.print(F("Timer Mode  "));
+  }
+  if (!DoorMode){
+    lcd.print(F("Sunset Mode  "));
+  }
+
+  bool set=true;
+  while(set){
+    uint8_t buttons = lcd.readButtons();
+    if (buttons) {
+      delay(150);
+      if (buttons & BUTTON_UP) {
+        DoorMode=!DoorMode;    
+      }
+      if (buttons & BUTTON_DOWN) {
+        DoorMode=!DoorMode;  
+      }
+      if (buttons & BUTTON_RIGHT) {
+        lcd.clear();
+        lcd.print(F("Value Set!"));
+        set=false;    
+      }
+      lcd.setCursor(0,1);  
+      if (DoorMode){
+        lcd.print(F("Timer Mode "));
+      }
+      if (!DoorMode){
+        lcd.print(F("Sunset Mode "));
+      }
+    }   
+  }
+  lcd.noBlink();
+  WriteToEeprom();
+  lcd.setBacklight(TEAL);
+}
+
+
+// ********************************************
+//void SetDayLightSavings()
+// ********************************************
+void SetDayLightSavings()
+{
+  lcd.setBacklight(RED);
+  lcd.blink();
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print(F("SetDayLghtSaving"));
+  lcd.setCursor(0,1);
+  if (!DayLightSavings){
+    lcd.print(F("Winter Time  "));
+  }
+  if (DayLightSavings){
+    lcd.print(F("Summer Time  "));
+  }
+
+  bool set=true;
+  while(set){
+    uint8_t buttons = lcd.readButtons();
+    if (buttons) {
+      delay(150);
+      if (buttons & BUTTON_UP) {
+        DayLightSavings=!DayLightSavings;    
+      }
+      if (buttons & BUTTON_DOWN) {
+        DayLightSavings=!DayLightSavings;  
+      }
+      if (buttons & BUTTON_RIGHT) {
+        lcd.clear();
+        lcd.print(F("Value Set!"));
+        set=false;    
+      }
+      lcd.setCursor(0,1);  
+      if (!DayLightSavings){
+        lcd.print(F("Winter Time  "));
+      }
+      if (DayLightSavings){
+        lcd.print(F("Summer Time  "));
+      }
+    }   
+  }
+  lcd.noBlink();
+  WriteToEeprom();
+  lcd.setBacklight(TEAL);
+}
+
+
+// ********************************************
+//Void SetSunriseSunsetOffset()
+// ********************************************
+void SetSunriseSunsetOffset(){
+  SunriseOffset=SetOffset(SunriseOffset, "SetSunriseOffset");
+  SunsetOffset=SetOffset(SunsetOffset, "SetSunsetOffset");
+  WriteToEeprom();
+}
+
+// ********************************************
+//TimeSpan SetOffset()
+// ********************************************
+TimeSpan SetOffset(TimeSpan span, String mystring)
+{
+  int offset=span.hours()*60+span.minutes();
+  lcd.setBacklight(RED);
+  lcd.blink();
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print(mystring);
+  lcd.setCursor(0,1);
+  lcd.print(offset);
+  lcd.print("minutes");
+
+  bool set=true;
+  while(set){
+    uint8_t buttons = lcd.readButtons();
+    if (buttons) {
+      delay(50);
+      if (buttons & BUTTON_UP) {
+        offset++;   
+      }
+      if (buttons & BUTTON_DOWN) {
+        offset--;  
+      }
+      if (buttons & BUTTON_RIGHT) {
+        lcd.clear();
+        lcd.print(F("Value Set!"));
+        set=false;    
+      }
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print(mystring);
+      lcd.setCursor(0,1);
+     
+      lcd.print(offset);
+      lcd.print("minutes");
+    }   
+  }
+  lcd.noBlink();
+  lcd.setBacklight(TEAL);
+  lcd.noAutoscroll();
+  return TimeSpan(0, offset/60, offset%60, 0);
+}
+
+
+
+// ********************************************
+// SetTimerYear.  
+// ********************************************
+DateTime SetTimerYear(DateTime time, String mystring)
+{
+  lcd.blink();
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Set" +mystring +" Year");
+  lcd.setCursor(0,1);
+  char buf2[] = "YYYYMMMDD-hh:mm";
+  lcd.print(time.toString(buf2));
+  bool set=true;
+  while(set){
+    uint8_t buttons = lcd.readButtons();
+    if (buttons) {
+      delay(150);
+      if (buttons & BUTTON_UP) {
+        time=time+TimeSpan(365,0,0,0);    
+      }
+      if (buttons & BUTTON_DOWN) {
+        time=time+TimeSpan(-365,0,0,0); 
+      }
+      if (buttons & BUTTON_RIGHT) {
+        lcd.clear();
+        lcd.print(F("Value Set!"));
+        set=false;    
+      }
+    lcd.setCursor(0,1);
+   char buf2[] = "YYYYMMMDD-hh:mm";
+   lcd.print(time.toString(buf2));
+    }   
+  }
+  lcd.noBlink();
+  return time;
+}
+// ********************************************
+// SetTimerMonth.  
+// ********************************************
+DateTime SetTimerMonth(DateTime time, String mystring)
+{
+  lcd.blink();
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Set" +mystring +" Month");
+  lcd.setCursor(0,1);
+  char buf2[] = "YYYYMMMDD-hh:mm";
+  lcd.print(time.toString(buf2));
+  bool set=true;
+  while(set){
+    uint8_t buttons = lcd.readButtons();
+    if (buttons) {
+      delay(150);
+      if (buttons & BUTTON_UP) {
+        if(time.month()<12){
+          time= DateTime (time.year(), time.month()+1, time.day(), time.hour(), time.minute(), time.second());    
+        }
+      }
+      if (buttons & BUTTON_DOWN) {
+        if(time.month()>1){
+          time= DateTime (time.year(), time.month()-1, time.day(), time.hour(), time.minute(), time.second());
+        }
+      }
+      if (buttons & BUTTON_RIGHT) {
+        lcd.clear();
+        lcd.print(F("Value Set!"));
+        set=false;    
+      }
+    lcd.setCursor(0,1);
+   char buf2[] = "YYYYMMMDD-hh:mm";
+   lcd.print(time.toString(buf2));
+    }   
+  }
+  lcd.noBlink();
+  return time;
+}
+
+// ********************************************
+// SetTimerDay.  
+// ********************************************
+DateTime SetTimerDay(DateTime time, String mystring)
+{
+  lcd.blink();
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Set" +mystring +" Day");
+  lcd.setCursor(0,1);
+  char buf2[] = "YYYYMMMDD-hh:mm";
+  lcd.print(time.toString(buf2));
+  bool set=true;
+  while(set){
+    uint8_t buttons = lcd.readButtons();
+    if (buttons) {
+      delay(150);
+      if (buttons & BUTTON_UP) {
+        time=time+TimeSpan(1,0,0,0);    
+      }
+      if (buttons & BUTTON_DOWN) {
+        time=time+TimeSpan(-1,0,0,0); 
+      }
+      if (buttons & BUTTON_RIGHT) {
+        lcd.clear();
+        lcd.print(F("Value Set!"));
+        set=false;    
+      }
+    lcd.setCursor(0,1);
+   char buf2[] = "YYYYMMMDD-hh:mm";
+   lcd.print(time.toString(buf2));
+    }   
+  }
+  lcd.noBlink();
+  return time;
+}
+
+// ********************************************
 // SetTimerHour.  
 // ********************************************
-
 DateTime SetTimerHour(DateTime time, String mystring)
 {
   lcd.blink();
@@ -602,7 +999,7 @@ DateTime SetTimerMinute(DateTime time, String mystring)
   lcd.blink();
   lcd.clear();
   lcd.setCursor(0,0);
-  lcd.print("Set" +mystring +" Min");
+  lcd.print("Set" +mystring +"Min");
   lcd.setCursor(0,1);
   char buf1[] = "hh:mm";
   lcd.print(time.toString(buf1));
@@ -658,8 +1055,11 @@ void IdleTask(KeyType key, DateTime now)
 // ********************************************
 
 void WriteToEeprom(){
-   EEpromValues mystruct ={TimeDoorOpen, TimeDoorClose, TimeNestOpen, TimeNestClose, SunsetOffset, SunRiseOffset, DoorMode, DoorRunningTime, NestRunningTime};
+   EEpromValues mystruct ={TimeDoorOpen, TimeDoorClose, TimeNestOpen, TimeNestClose, TimeLEDOpen, TimeLEDClose, SunsetOffset, SunriseOffset, DoorMode, DoorRunningTime, NestRunningTime, DayLightSavings};
    EEPROM.put(0, mystruct);
+   lcd.clear();
+   lcd.print(F("Values Stored!"));
+   delay(1000);
 }
 
 // ********************************************
@@ -672,11 +1072,14 @@ void ReadFromEeprom(){
   TimeDoorClose=mystruct.TimeDoorClose;
   TimeNestOpen=mystruct.TimeNestOpen;
   TimeNestClose=mystruct.TimeNestClose;
+  TimeLEDOpen=mystruct.TimeLEDOpen;
+  TimeLEDClose=mystruct.TimeLEDClose;
   SunsetOffset=mystruct.SunsetOffset;
-  SunRiseOffset=mystruct.SunRiseOffset;
+  SunriseOffset=mystruct.SunriseOffset;
   DoorMode=mystruct.DoorMode;
   DoorRunningTime=mystruct.DoorRunningTime;
   NestRunningTime=mystruct.NestRunningTime;
+  DayLightSavings=mystruct.DayLightSavings;
 }
 
 
@@ -686,29 +1089,83 @@ void ReadFromEeprom(){
 // Different Display Functions Below
 
 // ********************************************
+// DisplayDoorOpeningTime
+// ********************************************
+void DisplayDoorOpeningTime(){
+  if(!DoorMode){
+    DisplayTimeGeneral(Sunset+SunsetOffset, "Door Will Close");  
+  }
+  if(DoorMode){
+    DisplayTimeGeneral(TimeDoorClose, "Door Will Close");  
+  }
+}
+
+
+// ********************************************
+// DisplayDoorClosingTime
+// ********************************************
+void DisplayDoorClosingTime(){
+  if(!DoorMode){
+    DisplayTimeGeneral(Sunrise+SunriseOffset, "Door Will Open");  
+  }
+  if(DoorMode){
+    DisplayTimeGeneral(TimeDoorOpen, "Door Will Open");  
+  }
+}
+
+
+
+// ********************************************
 // DisplayInfo
 // ********************************************
 void DisplayInfo(DateTime now){
   static int InfoIndex;
   switch(InfoIndex){
     case 1:
-    DisplayDateTime(now);
-    break;
+      DisplayDateTime(now);
+      break;
     case 2:
-    DisplayBattery();
-    break;
+      DisplayDayLightSavings();
+      break;
     case 3:
-    DisplayDoorMode();
-    break;
+      DisplayBattery();
+      break;
     case 4:
-    DisplayTimeGeneral(TimeDoorOpen, F("DoorTimer Open"));
-    break;
+      DisplayDoorMode();
+      break;
     case 5:
-    DisplayTimeGeneral(TimeDoorClose, F("DoorTimer Close"));
-    break;
+      DisplayTimeGeneral(TimeDoorOpen, F("DoorTimer Open"));
+      break;
+    case 6:
+      DisplayTimeGeneral(TimeDoorClose, F("DoorTimer Close"));
+      break;
+    case 7:
+      DisplayTimeGeneral(TimeNestOpen, F("NestTimer Open"));
+      break;
+    case 8:
+      DisplayTimeGeneral(TimeNestClose, F("Nest Timer Close"));
+      break;
+    case 9:
+      DisplayTimeGeneral(TimeLEDOpen, F("LED Timer ON"));
+      break;
+    case 10:
+      DisplayTimeGeneral(TimeLEDClose, F("LED Timer Off"));
+      break;
+    case 11:
+      DisplayTimeGeneral(Sunrise, F("Todays Sunrise:"));
+      break;
+    case 12:
+      DisplayTimeGeneral(Sunset, F("Todays Sunset:"));
+      break;
+    case 13:
+      DisplayDoorOpeningTime();
+      break;
+      case 14:
+      DisplayDoorClosingTime();
+      break;
     default:
-    InfoIndex=0;
-    break;
+      InfoIndex=0;
+      break;
   }
   InfoIndex++;
 
@@ -754,6 +1211,22 @@ void DisplayDoorMode()
   }
 }
 
+// ********************************************
+// DisplayDayLightSavings
+// ********************************************
+void DisplayDayLightSavings()
+{
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print(F("Daylight Savings"));
+  lcd.setCursor(0,1);
+  if (!DayLightSavings){
+    lcd.print(F("WinterTime"));
+  }
+  if (DayLightSavings){
+  lcd.print(F("SummerTime"));
+  }
+}
 
 // ********************************************
 // DisplayTimeGeneral
