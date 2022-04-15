@@ -12,8 +12,8 @@ DateTime TimeLEDClose  (2000, 1, 1, 20, 0, 0);
 TimeSpan SunsetOffset (0, 0, 0, 0);
 TimeSpan SunriseOffset (0, 0, 0, 0);
 bool DoorMode = true;
-int DoorRunningTime=60000;
-int NestRunningTime=60000;
+unsigned long DoorRunningTime=120000;
+unsigned long NestRunningTime=120000;
 bool DayLightSavings=true;
 
 struct EEpromValues{
@@ -26,8 +26,8 @@ DateTime TimeLEDClose;
 TimeSpan SunsetOffset;
 TimeSpan SunriseOffset;
 bool DoorMode;
-int DoorRunningTime;
-int NestRunningTime;
+unsigned long DoorRunningTime;
+unsigned long NestRunningTime;
 bool DayLightSavings;
 };
 

@@ -247,6 +247,7 @@ void setup()
     Serial.println(F("RTC is NOT initialized, let's set the time!"));
     // When time needs to be set on a new device, or after a power loss, the
     // following line sets the RTC to the date & time this sketch was compiled
+    //Important! Set Computer time to winter time equivalent!
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
    }
   rtc.start();
@@ -356,6 +357,10 @@ void loop()
         break;
       case MenuLEDForceClose:
         CloseLED(); 
+        break;
+      case MenuTimeSetTime:
+        SetDayLightSavings();
+        SetCurrentTime(now);
         break;
       case MenuTimeSetDate:
         SetCurrentDate(now);
@@ -508,6 +513,8 @@ void OpenNest()
     NestRunningOpen=true;
     bitWrite(relay, 2, 1);
     bitWrite(relay, 3, 0);
+    bitWrite(relay, 4, 1);
+    bitWrite(relay, 5, 0);
     SendSerial();
   }
 }
@@ -526,6 +533,8 @@ void CloseNest()
     NestRunningOpen=false;
     bitWrite(relay, 2, 0);
     bitWrite(relay, 3, 1);
+    bitWrite(relay, 4, 0);
+    bitWrite(relay, 5, 1);
     SendSerial();
   }  
 }
@@ -536,11 +545,13 @@ void CloseNest()
 bool StopNest()  //This function is only used by the DoorHandlerTimer
 {
   lcd.clear();
-  lcd.print("F(Stopping Nest)");
+  lcd.print(F("Stopping Nest"));
   NestRunningOpen=false;
   NestRunningClose=false;
   bitWrite(relay, 2, 0);
   bitWrite(relay, 3, 0);
+  bitWrite(relay, 4, 0);
+  bitWrite(relay, 5, 0);
   SendSerial();
   return false;
 }
@@ -555,7 +566,7 @@ void OpenLED()
     lcd.print(F("Turning On LED"));
     LEDRunningOpen=true;
     LEDRunningClose=false; //This can be Improved
-    bitWrite(relay, 4, 1);
+    bitWrite(relay, 6, 1);
     SendSerial();
   }
 }
@@ -569,8 +580,8 @@ void CloseLED()
     lcd.clear();
     lcd.print(F("Turning off LED"));
     LEDRunningClose=true;
-    LEDRunningOpen=true; //This can be Improved
-    bitWrite(relay, 4, 0);
+    LEDRunningOpen=false; //This can be Improved
+    bitWrite(relay, 6, 0);
     SendSerial();
   }  
 }
@@ -686,16 +697,30 @@ void SetDoorTimer()
 }
 
 // ********************************************
-//void SetCurrentDate() Implement a RTC adjust here
+//void SetCurrentDate() 
 // ********************************************
 void SetCurrentDate(DateTime now)
 {
   lcd.setBacklight(RED);
-  SetTimerYear(now, "current");
-  SetTimerMonth(now, "current");
-  SetTimerDay(now,"current");
+  now=SetTimerYear(now, "current");
+  now=SetTimerMonth(now, "current");
+  now=SetTimerDay(now,"current");
+  rtc.adjust(now);
   lcd.setBacklight(TEAL);
 }
+
+// ********************************************
+//void SetCurrenTime() Implement a RTC adjust here
+// ********************************************
+void SetCurrentTime(DateTime now)
+{
+  lcd.setBacklight(RED);
+  now=SetTimerHour(now, "current");
+  now=SetTimerMinute(now, "current");
+  rtc.adjust(now- TimeSpan (0,DayLightSavings,0,0));
+  lcd.setBacklight(TEAL);
+}
+
 
 // ********************************************
 //void SetDoorMode()
@@ -974,7 +999,7 @@ DateTime SetTimerHour(DateTime time, String mystring)
   lcd.blink();
   lcd.clear();
   lcd.setCursor(0,0);
-  lcd.print("Set" +mystring +" Hour");
+  lcd.print("Set" +mystring +" Hr");
   lcd.setCursor(0,1);
   char buf1[] = "hh:mm";
   lcd.print(time.toString(buf1));
