@@ -58,12 +58,11 @@ const char g_MenuLED[] PROGMEM = {"3. LED"};
 const char g_MenuLEDSetTimer[] PROGMEM = {"3.1 SetLEDTimer"};
 const char g_MenuLEDForceOpen[] PROGMEM = {"3.2 Turn on LED"};
 const char g_MenuLEDForceClose[] PROGMEM = {"3.2 Turn off LED"};
-const char g_MenuBattery[] PROGMEM = {"4. Battery"};
-const char g_MenuTime[] PROGMEM = {"5. Time"};
-const char g_MenuTimeSetDate[] PROGMEM = {"5.1 Set Date"};
-const char g_MenuTimeSetTime[] PROGMEM = {"5.2 Set Time"};
-const char g_MenuTimeSetDayLightSavings[] PROGMEM = {"5.3SetSummerTime"};
-const char g_MenuInfoScreen[] PROGMEM = {"6. InfoScreen"};
+const char g_MenuTime[] PROGMEM = {"4. Time"};
+const char g_MenuTimeSetDate[] PROGMEM = {"4.1 Set Date"};
+const char g_MenuTimeSetTime[] PROGMEM = {"4.2 Set Time"};
+const char g_MenuTimeSetDayLightSavings[] PROGMEM = {"4.3SetSummerTime"};
+const char g_MenuInfoScreen[] PROGMEM = {"5. InfoScreen"};
 
 
 // define function IDs
@@ -83,7 +82,6 @@ enum MenuFID {
     MenuLEDSetTimer,
     MenuLEDForceOpen,
     MenuLEDForceClose,
-    MenuBattery,
     MenuTime,
     MenuTimeSetDate,
     MenuTimeSetTime,
@@ -150,7 +148,7 @@ bool LEDRunningClose=false; // Could be declared as static
 //Idle Timer
 elapsedMillis IdleTimeElapsed;
 elapsedMillis IdleScrollTimeElapsed;
-#define IDLEWAITTIME 10000 // milliseconds
+#define IDLEWAITTIME 60000 // milliseconds
 
 //Eeprom
 struct EEpromValues{
@@ -173,9 +171,7 @@ Dusk2Dawn City(56.0505, 12.69401, 1);   // Available methods are sunrise() and s
 DateTime Midnight (2000, 1, 1, 0, 0, 0);
 
 //Pins For Serial Relay
-const int dataPin  = 5;                          // Pin DS on Relay board
-const int latchPin =  6;                          // Pin LT on Relay board
-const int clockPin = 7;                          // Pin CL on Relay board
+
 
 byte relay=0;
 
@@ -187,20 +183,23 @@ byte relay=0;
 uint8_t i=0;
 void setup()
 {
+    //Pins for  Relay
+  pinMode(0, OUTPUT);
+  pinMode(1,  OUTPUT);
+  pinMode(2, OUTPUT);
+  pinMode(3, OUTPUT);
+  pinMode(4,  OUTPUT);
+  pinMode(5, OUTPUT);
+  pinMode(6, OUTPUT);
+  pinMode(7,  OUTPUT);
+  SendSerial();
+  
   // LCD
   lcd.begin(16, 2);
   lcd.print(F("Hello, Eggmakers"));
   lcd.noAutoscroll();
   
   delay(1000);
-
-  Serial.begin(9600);
-  Serial.println("===========================");
-  Serial.println(F("mblib - example for CMBMenu"));
-  Serial.println("===========================");
-  Serial.println("");
-  Serial.println(F("l: left, r: right, e: enter, x: exit, m: print menu"));
-  Serial.println("");
 
   // ** menu **
   // add nodes to menu (layer, string, function ID)
@@ -218,7 +217,6 @@ void setup()
   g_Menu.addNode(1, g_MenuLEDSetTimer, MenuLEDSetTimer);
   g_Menu.addNode(1, g_MenuLEDForceOpen, MenuLEDForceOpen);
   g_Menu.addNode(1, g_MenuLEDForceClose, MenuLEDForceClose);
-  g_Menu.addNode(0, g_MenuBattery, MenuBattery);
   g_Menu.addNode(0, g_MenuTime, MenuTime);
   g_Menu.addNode(1, g_MenuTimeSetDate, MenuTimeSetDate);
   g_Menu.addNode(1, g_MenuTimeSetTime, MenuTimeSetTime);
@@ -239,12 +237,11 @@ void setup()
 
    //RTC
   if (! rtc.begin()) {
-    Serial.println("Couldn't find RTC");
-    Serial.flush();
+
     while (1) delay(10);
   }
   if (! rtc.initialized() || rtc.lostPower()) {
-    Serial.println(F("RTC is NOT initialized, let's set the time!"));
+    //Serial.println(F("RTC is NOT initialized, let's set the time!"));
     // When time needs to be set on a new device, or after a power loss, the
     // following line sets the RTC to the date & time this sketch was compiled
     //Important! Set Computer time to winter time equivalent!
@@ -254,13 +251,6 @@ void setup()
 
   //EEPROM
   ReadFromEeprom();
-
-  //Pins for serial Relay
-  pinMode(latchPin, OUTPUT);
-  pinMode(dataPin,  OUTPUT);
-  pinMode(clockPin, OUTPUT);
-  //set all relays off
-  SendSerial();
 }
 
 
@@ -397,9 +387,9 @@ void printMenuEntry(const char* f_Info)
 
   // when using LCD: add/replace here code to
   // display info on LCD
-  Serial.println("----------------");
-  Serial.println(info_s);
-  Serial.println("----------------");
+  //Serial.println("----------------");
+  //Serial.println(info_s);
+  //Serial.println("----------------");
   
   // print on LCD
   lcd.clear();
@@ -444,10 +434,17 @@ KeyType getKey()
 // ********************************************
 // SendSerial
 // ********************************************
+//Turn off all relays except 7 and 8 (LED)before changing them, inorder to prevent voltage surge. 
 void SendSerial(){
-  digitalWrite(latchPin, LOW);                  // Latch is low while we load new data to register
-  shiftOut(dataPin, clockPin, MSBFIRST, relay);  // Load the data to register using ShiftOut function
-  digitalWrite(latchPin, HIGH);                 // Toggle latch to present the new data on register outputs
+  for (i=0; i<6; i++){
+    digitalWrite(i, 0);
+    delay(100);
+  }
+  delay(100);
+  for (i=0; i<8; i++){
+    digitalWrite(i, bitRead(relay, i));
+    delay(100); //Turn on the relay slowly
+  }
 }
 
 // ********************************************
@@ -606,20 +603,20 @@ void RunDoorHandler(DateTime now) // This function checks time. If any condition
 {
   DoorHandlerTimer.tick();
   if(DoorMode){ //Timer Mode
-    if(now.hour()==TimeDoorOpen.hour() && now.minute()==TimeDoorOpen.minute() &&now.second()==0){    
+    if(now.hour()==TimeDoorOpen.hour() && now.minute()==TimeDoorOpen.minute() ){    
       OpenDoor();    
     }
-    else if(now.hour()==TimeDoorClose.hour() && now.minute()==TimeDoorClose.minute() && now.second()==0){
+    else if(now.hour()==TimeDoorClose.hour() && now.minute()==TimeDoorClose.minute() ){
       CloseDoor();
     }
   }
   if (!DoorMode){ //SunsetMode
     DateTime SunOpen = Sunrise + SunriseOffset; 
     DateTime SunClose = Sunset + SunsetOffset; 
-    if(now.hour()==SunOpen.hour() && now.minute()==SunOpen.minute() &&now.second()==0){    
+    if(now.hour()==SunOpen.hour() && now.minute()==SunOpen.minute() ){    
       OpenDoor();    
     }
-    else if(now.hour()==SunClose.hour() && now.minute()==SunClose.minute() && now.second()==0){
+    else if(now.hour()==SunClose.hour() && now.minute()==SunClose.minute()) {
       CloseDoor();
     }
   }
@@ -635,10 +632,10 @@ void RunDoorHandler(DateTime now) // This function checks time. If any condition
 void RunNestHandler(DateTime now) //This function checks time. If any conditions are true (on the Second) these actions will be executed. Door is automatically stopped after int NestRunningTime
 {
   NestHandlerTimer.tick();
-  if(now.hour()==TimeNestOpen.hour() && now.minute()==TimeNestOpen.minute() &&now.second()==0){    
+  if(now.hour()==TimeNestOpen.hour() && now.minute()==TimeNestOpen.minute()){    
     OpenNest();    
   }
-  else if(now.hour()==TimeNestClose.hour() && now.minute()==TimeNestClose.minute() && now.second()==0){
+  else if(now.hour()==TimeNestClose.hour() && now.minute()==TimeNestClose.minute()){
     CloseNest();
     }
 }
@@ -648,10 +645,10 @@ void RunNestHandler(DateTime now) //This function checks time. If any conditions
 // ********************************************
 void RunLEDHandler(DateTime now) //This function checks time. If any conditions are true (on the Second) these actions will be executed. 
 {
-  if(now.hour()==TimeLEDOpen.hour() && now.minute()==TimeLEDOpen.minute() &&now.second()==0){    
+  if(now.hour()==TimeLEDOpen.hour() && now.minute()==TimeLEDOpen.minute() ){    
     OpenLED();    
   }
-  else if(now.hour()==TimeLEDClose.hour() && now.minute()==TimeLEDClose.minute() && now.second()==0){
+  else if(now.hour()==TimeLEDClose.hour() && now.minute()==TimeLEDClose.minute() ){
     CloseLED();
     }
 }
@@ -1137,7 +1134,7 @@ void DisplayInfo(DateTime now){
       DisplayDayLightSavings();
       break;
     case 3:
-      DisplayBattery();
+      //DisplayBattery();
       break;
     case 4:
       DisplayDoorMode();
