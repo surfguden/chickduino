@@ -436,11 +436,6 @@ KeyType getKey()
 // ********************************************
 //Turn off all relays except 7 and 8 (LED)before changing them, inorder to prevent voltage surge. 
 void SendSerial(){
-  for (i=0; i<6; i++){
-    digitalWrite(i, 0);
-    delay(100);
-  }
-  delay(100);
   for (i=0; i<8; i++){
     digitalWrite(i, bitRead(relay, i));
     delay(100); //Turn on the relay slowly
@@ -459,7 +454,9 @@ void OpenDoor()
     lcd.print(F("Opening Door"));
     DoorRunningOpen=true;
     DoorRunningClose=false;
-
+    bitWrite(relay, 0, 0);
+    bitWrite(relay, 1, 1);
+    SendSerial();
     bitWrite(relay, 0, 1);
     bitWrite(relay, 1, 0);
     SendSerial();
@@ -478,6 +475,9 @@ void CloseDoor()
     lcd.print(F("Closing Door"));
     DoorRunningOpen=false;
     DoorRunningClose=true;
+    bitWrite(relay, 0, 0);
+    bitWrite(relay, 1, 0);
+    SendSerial();
     bitWrite(relay, 0, 0);
     bitWrite(relay, 1, 1);
     SendSerial();
@@ -510,6 +510,11 @@ void OpenNest()
     lcd.print(F("Opening Nest"));
     NestRunningClose=false;
     NestRunningOpen=true;
+    bitWrite(relay, 2, 0);
+    bitWrite(relay, 3, 0);
+    bitWrite(relay, 4, 0);
+    bitWrite(relay, 5, 0);
+    SendSerial();
     bitWrite(relay, 2, 1);
     bitWrite(relay, 3, 0);
     bitWrite(relay, 4, 1);
@@ -530,6 +535,11 @@ void CloseNest()
     lcd.print(F("Closing Nest"));
     NestRunningClose=true;
     NestRunningOpen=false;
+    bitWrite(relay, 2, 0);
+    bitWrite(relay, 3, 0);
+    bitWrite(relay, 4, 0);
+    bitWrite(relay, 5, 0);
+    SendSerial();
     bitWrite(relay, 2, 0);
     bitWrite(relay, 3, 1);
     bitWrite(relay, 4, 0);
