@@ -454,7 +454,7 @@ void OpenDoor()
     DoorRunningOpen=true;
     DoorRunningClose=false;
     bitWrite(relay, 0, 0);
-    bitWrite(relay, 1, 1);
+    bitWrite(relay, 1, 0);
     SendSerial();
     bitWrite(relay, 0, 1);
     bitWrite(relay, 1, 0);
