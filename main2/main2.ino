@@ -1,4 +1,3 @@
-//TBD  Battery, SunriseSundown Handler,
 
 
 // ** Dependencies **
